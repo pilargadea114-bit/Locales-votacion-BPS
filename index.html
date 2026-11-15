@@ -769,8 +769,28 @@ pliegue.onclick = () => {
   pliegue.textContent = abierta ? 'Ocultar lista ▲' : 'Mostrar lista ▼';
 };
 
+function puntaje(p, q, esNumero, texto) {
+  // Con números: primero el número de circuito, después el resto.
+  if (esNumero) {
+    const nums = (p.k || '').split('-').map(x => x.trim()).filter(Boolean);
+    if (nums.includes(q)) return 0;                       // circuito exacto
+    if (nums.some(n => n.startsWith(q))) return 1;        // circuito que empieza igual
+    if (nums.some(n => n.includes(q))) return 2;          // circuito que lo contiene
+    if (String(p.q) === q) return 3;                      // cantidad de circuitos
+    if (sinTildes(p.z) === q) return 4;                   // CCZ
+    return texto.includes(q) ? 6 : -1;                    // cualquier otro campo
+  }
+  // Con texto: nombre del local, coordinadora, dirección, resto.
+  if (sinTildes(p.n).includes(q)) return 0;
+  if (sinTildes(p.c) === q || ('coordinadora ' + sinTildes(p.c)) === q) return 1;
+  if (sinTildes(p.d).includes(q)) return 2;
+  if ((p.k || '').split('-').some(n => n.trim() === q)) return 3;
+  return texto.includes(q) ? 4 : -1;
+}
+
 function filtrar() {
   const q = sinTildes(caja.value.trim());
+  const esNumero = /^\d+$/.test(q);
   const fc = fcoord.value;
   const soloRev = frevisar.checked;
   const res = [];
@@ -778,34 +798,51 @@ function filtrar() {
     const p = PUNTOS[i];
     if (fc && p.c !== fc) continue;
     if (soloRev && p.v !== 'SÍ') continue;
+    let sc = 0;
     if (q) {
-      const texto = sinTildes([p.n, p.d, p.c, p.z, p.k, p.s, p.r, p.a, p.g].join(' '));
-      if (!texto.includes(q)) continue;
+      // las credenciales no se buscan: son dato secundario, visible en la ficha
+      const texto = sinTildes([p.n, p.d, p.c, p.z, p.k, p.s, p.a, p.g].join(' '));
+      sc = puntaje(p, q, esNumero, texto);
+      if (sc < 0) continue;
     }
-    res.push(i);
+    res.push([sc, i]);
   }
+  // los de menor puntaje primero; a igual puntaje, por nombre
+  res.sort((a, b) => a[0] - b[0] || PUNTOS[a[1]].n.localeCompare(PUNTOS[b[1]].n, 'es'));
+
   lista.innerHTML = '';
-  res.slice(0, 200).forEach(i => {
+  res.slice(0, 200).forEach(([sc, i]) => {
     const p = PUNTOS[i];
-    const li = document.createElement('li');
     const rev = p.v === 'SÍ' ? ' <span class="badge rev">revisar</span>' : '';
-    li.innerHTML = `<b>${p.n}</b>${rev}<span class="badge">${p.c}</span>` +
-                   `<small>${p.d || ''}</small>` +
-                   `<small>${p.q} circuito(s) · ${p.g} · cred. ${p.r || '-'}</small>`;
-    li.onclick = () => {
-      mapa.setView([p.lat, p.lon], 17);
-      marcadores[i].openPopup();
-      if (window.innerWidth < 700) {
-        abierta = false; lista.style.display = 'none'; pliegue.textContent = 'Mostrar lista ▼';
-      }
-    };
-    lista.appendChild(li);
+    const esCirc = esNumero && sc <= 2;
+    li_marcar(p, i, rev, esCirc ? ` <span class="badge">circuito ${q}</span>` : '');
   });
   contador.textContent = res.length + ' de ' + PUNTOS.length;
+  const visibles = new Set(res.map(x => x[1]));
   marcadores.forEach((m, i) => {
-    if (res.includes(i)) { if (!capa.hasLayer(m)) m.addTo(capa); }
+    if (visibles.has(i)) { if (!capa.hasLayer(m)) m.addTo(capa); }
     else if (capa.hasLayer(m)) capa.removeLayer(m);
   });
+}
+
+function circuitosCortos(k) {
+  const arr = (k || '').split('-').filter(Boolean);
+  return arr.length > 5 ? arr.slice(0, 5).join('-') + '…' : arr.join('-');
+}
+
+function li_marcar(p, i, rev, extra) {
+  const li = document.createElement('li');
+  li.innerHTML = `<b>${p.n}</b>${rev}<span class="badge">${p.c}</span>${extra || ''}` +
+                 `<small>${p.d || ''}</small>` +
+                 `<small>${p.q} circuito(s) · ${p.g} · Nº ${circuitosCortos(p.k)}</small>`;
+  li.onclick = () => {
+    mapa.setView([p.lat, p.lon], 17);
+    marcadores[i].openPopup();
+    if (window.innerWidth < 700) {
+      abierta = false; lista.style.display = 'none'; pliegue.textContent = 'Mostrar lista ▼';
+    }
+  };
+  lista.appendChild(li);
 }
 
 caja.addEventListener('input', filtrar);
